@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Leaves Falling One by One</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      height: 100vh;
+      background: 
+      radial-gradient(circle at 20% 30%, #fff3e0 0%, transparent 50%),
+      radial-gradient(circle at 80% 40%, #ffe0b2 0%, transparent 60%),
+      radial-gradient(circle at 50% 70%, #fff9c4 0%, transparent 50%),
+      radial-gradient(circle at 60% 20%, #fce4ec 0%, transparent 50%),
+      #fffde7;
+    }
+    .leaf {
+      position: fixed;
+      width: 70px;
+      height: 70px;
+      pointer-events: none;
+      will-change: transform;
+      opacity: 0.9;
+      user-select: none;
+      background: transparent;
+    }
+  </style>
+</head>
+<body>
+<script>
+  const leavesCount = 30;
+  const leaves = [];
+  const svgPaths = [
+    'svg/leaf1.svg',
+    'svg/leaf2.svg',
+    'svg/leaf3.svg',
+    'svg/leaf4.svg'
+  ];
+  const svgCache = {};
+
+  async function loadSVG(path) {
+    if (!svgCache[path]) {
+      const res = await fetch(path);
+      svgCache[path] = await res.text();
+    }
+    return svgCache[path];
+  }
+
+  function randomRange(min, max) {
+    return Math.random() * (max - min) + min;
+  }
+
+  class Leaf {
+    constructor() {
+      this.el = document.createElement('div');
+      this.el.className = 'leaf';
+      document.body.appendChild(this.el);
+      this.reset(true);
+    }
+
+    async reset(initial = false) {
+      const svg = await loadSVG(svgPaths[Math.floor(Math.random() * svgPaths.length)]);
+      this.el.innerHTML = svg;
+      this.svgElement = this.el.querySelector('svg');
+
+
+      // Set random size between 40 and 70
+      this.size = randomRange(40, 70);
+      this.el.style.width = `${this.size}px`;
+      this.el.style.height = `${this.size}px`;
+
+      // Start position: top-left corner (x near 0 to 50px), y = -50 (above screen)
+      this.startX = randomRange(0, 50);
+      this.startY = -50;
+
+      // End position: anywhere horizontally on screen, and vertical between 30%-90% screen height
+      this.endX = randomRange(0, window.innerWidth - 40);
+      this.endY = randomRange(window.innerHeight * 0.3, window.innerHeight * 0.9);
+
+      // Control points for Bezier curve, allowing leaves to move freely
+      this.cp1X = randomRange(0, window.innerWidth);
+      this.cp1Y = randomRange(this.startY + 50, this.endY / 2);
+
+      this.cp2X = randomRange(0, window.innerWidth);
+      this.cp2Y = randomRange(this.endY / 2, this.endY);
+
+      this.duration = randomRange(6000, 11000);
+
+      this.rotation = randomRange(0, 360);
+      this.rotationSpeed = randomRange(50, 180);
+
+      this.startTime = initial ? performance.now() + randomRange(0, 1000) : 0;
+      this.isFalling = false;
+      this.hasLanded = false;
+
+      this.el.style.display = 'none';
+
+      // For smooth landing easing
+      this.landingEaseDuration = 1500; // ms
+      this.landingStartTime = null;
+    }
+
+    startFalling(startTime) {
+      this.startTime = startTime;
+      this.isFalling = true;
+      this.hasLanded = false;
+      this.landingStartTime = null;
+      this.el.style.display = 'block';
+    }
+
+    cubicBezier(t, p0, p1, p2, p3) {
+      const c = 3 * (p1 - p0);
+      const b = 3 * (p2 - p1) - c;
+      const a = p3 - p0 - c - b;
+      return a * (t ** 3) + b * (t ** 2) + c * t + p0;
+    }
+
+    // Simple ease-out cubic for smooth landing
+    easeOutCubic(t) {
+      return 1 - Math.pow(1 - t, 3);
+    }
+
+    update(now) {
+      if (!this.isFalling) return;
+
+      const elapsed = now - this.startTime;
+      if (elapsed < 0) return;
+
+      if (elapsed >= this.duration) {
+        if (!this.hasLanded) {
+          // Start smooth landing easing
+          this.landingStartTime = now;
+          this.hasLanded = true;
+        }
+
+        // Smooth easing from current position to end position & rotation
+        const landingElapsed = now - this.landingStartTime;
+        if (landingElapsed <= this.landingEaseDuration) {
+          const t = this.easeOutCubic(landingElapsed / this.landingEaseDuration);
+
+          // Current position (should be close to endX, endY but interpolate for smoothness)
+          const prevX = this.cubicBezier(1, this.startX, this.cp1X, this.cp2X, this.endX);
+          const prevY = this.cubicBezier(1, this.startY, this.cp1Y, this.cp2Y, this.endY);
+          const prevRotation = this.rotation + (this.rotationSpeed * (this.duration / 1000));
+
+          // Interpolate position & rotation smoothly to final resting state
+          const smoothX = prevX; // x fixed at endX (already at end)
+          const smoothY = prevY + (0 * t); // no vertical shift after landing
+          const smoothRotation = prevRotation; // no rotation after landing
+
+          this.el.style.transform = `translate(${smoothX}px, ${smoothY}px) rotate(${smoothRotation}deg)`;
+        } else {
+          // Landing complete, keep leaf fixed
+          this.isFalling = false;
+          this.el.style.transform = `translate(${this.endX}px, ${this.endY}px) rotate(${this.rotation + (this.rotationSpeed * (this.duration / 1000))}deg)`;
+        }
+        return;
+      }
+
+      const t = elapsed / this.duration;
+      const x = this.cubicBezier(t, this.startX, this.cp1X, this.cp2X, this.endX);
+      const y = this.cubicBezier(t, this.startY, this.cp1Y, this.cp2Y, this.endY);
+      const rotation = this.rotation + (this.rotationSpeed * (elapsed / 1000));
+
+      this.el.style.transform = `translate(${x}px, ${y}px) rotate(${rotation}deg)`;
+    }
+  }
+
+  async function initializeLeaves() {
+    for (let i = 0; i < leavesCount; i++) {
+      const leaf = new Leaf();
+      await leaf.reset(true);
+      leaves.push(leaf);
+    }
+
+    animateLeaves();
+    startLeavesFallingSequentially();
+  }
+
+  function animateLeaves() {
+    function animate(now) {
+      leaves.forEach(leaf => leaf.update(now));
+      requestAnimationFrame(animate);
+    }
+    requestAnimationFrame(animate);
+  }
+
+  function startLeavesFallingSequentially() {
+    let index = 0;
+
+    function startNextLeaf() {
+      if (index >= leaves.length) return;
+      const now = performance.now();
+      leaves[index].startFalling(now);
+      index++;
+      setTimeout(startNextLeaf, randomRange(5000, 7000));
+    }
+
+    startNextLeaf();
+  }
+
+  window.addEventListener('resize', async () => {
+    for (const leaf of leaves) {
+      await leaf.reset(true);
+      leaf.el.style.display = 'none';
+    }
+    startLeavesFallingSequentially();
+  });
+
+  initializeLeaves();
+</script>
+</body>
+</html>
